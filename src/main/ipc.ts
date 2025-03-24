@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 
+import { isMac, isWin } from '@main/constant'
 import { getBinaryPath, isBinaryExists, runInstallScript } from '@main/utils/process'
 import { MCPServer, Shortcut, ThemeMode } from '@types'
 import { BrowserWindow, ipcMain, session, shell } from 'electron'
@@ -9,6 +10,7 @@ import { titleBarOverlayDark, titleBarOverlayLight } from './config'
 import AppUpdater from './services/AppUpdater'
 import BackupManager from './services/BackupManager'
 import { configManager } from './services/ConfigManager'
+import CopilotService from './services/CopilotService'
 import { ExportService } from './services/ExportService'
 import FileService from './services/FileService'
 import FileStorage from './services/FileStorage'
@@ -67,9 +69,28 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
     configManager.setLanguage(language)
   })
 
+  // launch on boot
+  ipcMain.handle('app:set-launch-on-boot', (_, openAtLogin: boolean) => {
+    // Set login item settings for windows and mac
+    // linux is not supported because it requires more file operations
+    if (isWin || isMac) {
+      app.setLoginItemSettings({ openAtLogin })
+    }
+  })
+
+  // launch to tray
+  ipcMain.handle('app:set-launch-to-tray', (_, isActive: boolean) => {
+    configManager.setLaunchToTray(isActive)
+  })
+
   // tray
   ipcMain.handle('app:set-tray', (_, isActive: boolean) => {
     configManager.setTray(isActive)
+  })
+
+  // to tray on close
+  ipcMain.handle('app:set-tray-on-close', (_, isActive: boolean) => {
+    configManager.setTrayOnClose(isActive)
   })
 
   ipcMain.handle('app:restart-tray', () => TrayService.getInstance().restartTray())
@@ -83,8 +104,21 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
   })
 
   // theme
-  ipcMain.handle('app:set-theme', (_, theme: ThemeMode) => {
+  ipcMain.handle('app:set-theme', (event, theme: ThemeMode) => {
+    if (theme === configManager.getTheme()) return
+
     configManager.setTheme(theme)
+
+    // should sync theme change to all windows
+    const senderWindowId = event.sender.id
+    const windows = BrowserWindow.getAllWindows()
+    // 向其他窗口广播主题变化
+    windows.forEach((win) => {
+      if (win.webContents.id !== senderWindowId) {
+        win.webContents.send('theme:change', theme)
+      }
+    })
+
     mainWindow?.setTitleBarOverlay &&
       mainWindow.setTitleBarOverlay(theme === 'dark' ? titleBarOverlayDark : titleBarOverlayLight)
   })
@@ -129,6 +163,7 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
   ipcMain.handle('backup:restore', backupManager.restore)
   ipcMain.handle('backup:backupToWebdav', backupManager.backupToWebdav)
   ipcMain.handle('backup:restoreFromWebdav', backupManager.restoreFromWebdav)
+  ipcMain.handle('backup:listWebdavFiles', backupManager.listWebdavFiles)
 
   // file
   ipcMain.handle('file:open', fileManager.open)
@@ -252,6 +287,13 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
     mainWindow?.webContents.send('mcp:servers-updated', servers)
   })
 
-  // Clean up MCP services when app quits
   app.on('before-quit', () => mcpService.cleanup())
+
+  //copilot
+  ipcMain.handle('copilot:get-auth-message', CopilotService.getAuthMessage)
+  ipcMain.handle('copilot:get-copilot-token', CopilotService.getCopilotToken)
+  ipcMain.handle('copilot:save-copilot-token', CopilotService.saveCopilotToken)
+  ipcMain.handle('copilot:get-token', CopilotService.getToken)
+  ipcMain.handle('copilot:logout', CopilotService.logout)
+  ipcMain.handle('copilot:get-user', CopilotService.getUser)
 }

@@ -10,7 +10,7 @@ import {
   QuestionCircleOutlined
 } from '@ant-design/icons'
 import TranslateButton from '@renderer/components/TranslateButton'
-import { isFunctionCallingModel, isVisionModel, isWebSearchModel } from '@renderer/config/models'
+import { isFunctionCallingModel, isGenerateImageModel, isVisionModel, isWebSearchModel } from '@renderer/config/models'
 import db from '@renderer/databases'
 import { useAssistant } from '@renderer/hooks/useAssistant'
 import { useMessageOperations } from '@renderer/hooks/useMessageOperations'
@@ -21,7 +21,7 @@ import { useSidebarIconShow } from '@renderer/hooks/useSidebarIcon'
 import { addAssistantMessagesToTopic, getDefaultTopic } from '@renderer/services/AssistantService'
 import { EVENT_NAMES, EventEmitter } from '@renderer/services/EventService'
 import FileManager from '@renderer/services/FileManager'
-import { getUserMessage } from '@renderer/services/MessagesService'
+import { checkRateLimit, getUserMessage } from '@renderer/services/MessagesService'
 import { estimateMessageUsage, estimateTextTokens as estimateTxtTokens } from '@renderer/services/TokenService'
 import { translateText } from '@renderer/services/TranslateService'
 import WebSearchService from '@renderer/services/WebSearchService'
@@ -44,6 +44,7 @@ import styled from 'styled-components'
 import NarrowLayout from '../Messages/NarrowLayout'
 import AttachmentButton from './AttachmentButton'
 import AttachmentPreview from './AttachmentPreview'
+import GenerateImageButton from './GenerateImageButton'
 import KnowledgeBaseButton from './KnowledgeBaseButton'
 import MCPToolsButton from './MCPToolsButton'
 import MentionModelsButton from './MentionModelsButton'
@@ -145,6 +146,9 @@ const Inputbar: FC<Props> = ({ assistant: _assistant, setActiveTopic, topic }) =
 
   const sendMessage = useCallback(async () => {
     if (inputEmpty || loading) {
+      return
+    }
+    if (checkRateLimit(assistant)) {
       return
     }
 
@@ -515,11 +519,9 @@ const Inputbar: FC<Props> = ({ assistant: _assistant, setActiveTopic, topic }) =
   }, [isDragging, handleDrag, handleDragEnd])
 
   useShortcut('new_topic', () => {
-    if (!loading) {
-      addNewTopic()
-      EventEmitter.emit(EVENT_NAMES.SHOW_TOPIC_SIDEBAR)
-      textareaRef.current?.focus()
-    }
+    addNewTopic()
+    EventEmitter.emit(EVENT_NAMES.SHOW_TOPIC_SIDEBAR)
+    textareaRef.current?.focus()
   })
 
   useShortcut('clear_topic', () => {
@@ -625,7 +627,6 @@ const Inputbar: FC<Props> = ({ assistant: _assistant, setActiveTopic, topic }) =
   }
 
   const onEnableWebSearch = () => {
-    console.log(assistant)
     if (!isWebSearchModel(model)) {
       if (!WebSearchService.isWebSearchEnabled()) {
         window.modal.confirm({
@@ -644,9 +645,16 @@ const Inputbar: FC<Props> = ({ assistant: _assistant, setActiveTopic, topic }) =
     updateAssistant({ ...assistant, enableWebSearch: !assistant.enableWebSearch })
   }
 
+  const onEnableGenerateImage = () => {
+    updateAssistant({ ...assistant, enableGenerateImage: !assistant.enableGenerateImage })
+  }
+
   useEffect(() => {
     if (!isWebSearchModel(model) && !WebSearchService.isWebSearchEnabled() && assistant.enableWebSearch) {
       updateAssistant({ ...assistant, enableWebSearch: false })
+    }
+    if (!isGenerateImageModel(model) && assistant.enableGenerateImage) {
+      updateAssistant({ ...assistant, enableGenerateImage: false })
     }
   }, [assistant, model, updateAssistant])
 
@@ -715,11 +723,6 @@ const Inputbar: FC<Props> = ({ assistant: _assistant, setActiveTopic, topic }) =
                 </ToolbarButton>
               </Tooltip>
               <AttachmentButton model={model} files={files} setFiles={setFiles} ToolbarButton={ToolbarButton} />
-              <MentionModelsButton
-                mentionModels={mentionModels}
-                onMentionModel={(model) => onMentionModel(model, mentionFromKeyboard)}
-                ToolbarButton={ToolbarButton}
-              />
               <Tooltip placement="top" title={t('chat.input.web_search')} arrow>
                 <ToolbarButton type="text" onClick={onEnableWebSearch}>
                   <GlobalOutlined
@@ -742,6 +745,17 @@ const Inputbar: FC<Props> = ({ assistant: _assistant, setActiveTopic, topic }) =
                   ToolbarButton={ToolbarButton}
                 />
               )}
+              <GenerateImageButton
+                model={model}
+                assistant={assistant}
+                onEnableGenerateImage={onEnableGenerateImage}
+                ToolbarButton={ToolbarButton}
+              />
+              <MentionModelsButton
+                mentionModels={mentionModels}
+                onMentionModel={(model) => onMentionModel(model, mentionFromKeyboard)}
+                ToolbarButton={ToolbarButton}
+              />
               <Tooltip placement="top" title={t('chat.input.clear', { Command: cleanTopicShortcut })} arrow>
                 <Popconfirm
                   title={t('chat.input.clear.content')}
